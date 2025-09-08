@@ -1,0 +1,212 @@
+    :root {
+        --header-bg: #4a90e2;
+        --header-color: #fff;
+        --button-bg: #5cb85c;
+        --button-hover-bg: #449d44;
+        --button-text: #fff;
+        --table-border: #ddd;
+        --cell-bg: #fff;
+        --available-color: #28a745;
+        --footer-bg: #f8f9fa;
+        --footer-text: #6c757d;
+        --danger: #e74c3c;
+        --muted: #6c757d
+    }
+
+    * {
+        box-sizing: border-box
+    }
+
+    body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background: #f4f7f9;
+        color: #333
+    }
+
+    header {
+        background: var(--header-bg);
+        color: var(--header-color);
+        padding: 1rem 2rem;
+        display: flex;
+        gap: 1rem;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, .1)
+    }
+
+    header h1 {
+        margin: 0;
+        font-size: 1.25rem
+    }
+
+    .right {
+        display: flex;
+        gap: .5rem;
+        flex-wrap: wrap
+    }
+
+    .btn {
+        padding: .6rem 1rem;
+        border: 0;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: .15s transform, .2s background;
+        display: inline-flex;
+        align-items: center;
+        gap: .5rem;
+        background: var(--button-bg);
+        color: var(--button-text)
+    }
+
+    .btn:hover {
+        background: var(--button-hover-bg);
+        transform: translateY(-1px)
+    }
+
+    .btn.secondary {
+        background: #6c8ef5
+    }
+
+    .btn.gray {
+        background: #adb5bd
+    }
+
+    .btn.danger {
+        background: var(--danger)
+    }
+
+    .btn.muted {
+        background: #9fa6b2
+    }
+
+    main {
+        flex: 1;
+        padding: 1.25rem
+    }
+
+    .toolbar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 1rem;
+        margin-bottom: 1rem
+    }
+
+    .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .5rem
+    }
+
+    .inline {
+        display: flex;
+        align-items: center;
+        gap: .5rem
+    }
+
+    select,
+    input[type="time"] {
+        padding: .5rem;
+        border: 1px solid #cfd4da;
+        border-radius: 8px;
+        background: #fff
+    }
+
+    .table-container {
+        overflow: auto;
+        border-radius: 10px;
+        border: 1px solid var(--table-border);
+        background: #fff;
+        box-shadow: 0 0 10px rgba(0, 0, 0, .06)
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 760px
+    }
+
+    th,
+    td {
+        padding: 10px 8px;
+        text-align: center;
+        border: 1px solid var(--table-border)
+    }
+
+    thead {
+        background: #e9ecef;
+        position: sticky;
+        top: 0;
+        z-index: 1
+    }
+
+    td {
+        cursor: pointer;
+        background: var(--cell-bg);
+        transition: background-color .15s
+    }
+
+    td.available {
+        background: var(--available-color);
+        color: #fff
+    }
+
+    td.time {
+        background: #f7f7f8;
+        font-weight: 600;
+        cursor: default
+    }
+
+    td:focus {
+        outline: 2px solid #4a90e2;
+        outline-offset: -2px
+    }
+
+    .legend {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        margin: .75rem 0;
+        color: var(--muted);
+        font-size: .9rem
+    }
+
+    .dot {
+        width: 14px;
+        height: 14px;
+        border-radius: 3px;
+        display: inline-block;
+        border: 1px solid #cfd4da
+    }
+
+    .dot.free {
+        background: var(--available-color);
+        border-color: var(--available-color)
+    }
+
+    footer {
+        padding: 1rem;
+        text-align: center;
+        background: var(--footer-bg);
+        border-top: 1px solid var(--table-border);
+        color: var(--footer-text)
+    }
+
+    @media (max-width:768px) {
+        header {
+            flex-direction: column;
+            gap: .5rem
+        }
+
+        .toolbar {
+            grid-template-columns: 1fr;
+            gap: .75rem
+        }
+
+        .controls {
+            justify-content: center
+        }
+    }

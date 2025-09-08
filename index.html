@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Disponibilidad Laboral</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Horario de Disponibilidad Laboral</h1>
+  <div class="right">
+    <button class="btn muted" id="loginBtn" type="button">Iniciar sesión</button>
+  </div>
+</header>
+
+<main>
+  <div class="toolbar" aria-label="Controles">
+    <div class="controls">
+      <button class="btn" id="saveBtn" type="button" title="Guardar en este navegador">Guardar</button>
+      <button class="btn gray" id="selectAllBtn" type="button">Seleccionar todo</button>
+      <button class="btn danger" id="clearBtn" type="button">Limpiar todo</button>
+      <div class="inline">
+        <label for="clearDaySelect">Limpiar día:</label>
+        <select id="clearDaySelect" aria-label="Seleccionar día para limpiar">
+          <option value="">—</option>
+        </select>
+        <button class="btn muted" id="clearDayBtn" type="button">OK</button>
+      </div>
+    </div>
+
+    <div class="controls" role="group" aria-label="Opciones">
+      <div class="inline">
+        <label for="intervalSelect">Intervalo:</label>
+        <select id="intervalSelect" title="Duración de cada bloque">
+          <option value="60">60 min</option>
+          <option value="30">30 min</option>
+        </select>
+      </div>
+      <div class="inline">
+        <label for="startTime">Desde:</label>
+        <input type="time" id="startTime" value="08:00" step="1800">
+      </div>
+      <div class="inline">
+        <label for="endTime">Hasta:</label>
+        <input type="time" id="endTime" value="20:00" step="1800">
+      </div>
+      <button class="btn secondary" id="rebuildBtn" type="button" title="Reconstruir la grilla con el intervalo/horas">Actualizar grilla</button>
+      <button class="btn gray" id="exportBtn" type="button" title="Descargar JSON">Exportar</button>
+      <label class="btn gray" for="importFile" title="Cargar JSON">
+        Importar <input id="importFile" type="file" accept="application/json" style="display:none">
+      </label>
+      <button class="btn gray" id="copyCsvBtn" type="button" title="Copiar CSV al portapapeles">Copiar CSV</button>
+    </div>
+  </div>
+
+  <p class="legend">
+    <span class="dot" style="background:#fff"></span> No disponible
+    <span class="dot free"></span> Disponible
+    <span>• Arrastra para pintar • Shift-click para rangos • Teclas ← → ↑ ↓ navegan</span>
+  </p>
+
+  <div class="table-container">
+    <table id="scheduleTable" role="grid" aria-label="Tabla de disponibilidad">
+      <thead>
+        <tr>
+          <th scope="col">Hora</th>
+          <th scope="col">Lunes</th>
+          <th scope="col">Martes</th>
+          <th scope="col">Miércoles</th>
+          <th scope="col">Jueves</th>
+          <th scope="col">Viernes</th>
+          <th scope="col">Sábado</th>
+          <th scope="col">Domingo</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</main>
+
+<footer>
+  <p>&copy; 2025 - Creado con HTML, CSS y JavaScript</p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
