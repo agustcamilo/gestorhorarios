@@ -1,0 +1,277 @@
+-- =========================================================
+--  Gestor de Horarios — Esquema MySQL 8 (mixto)
+--  - Modelo ER principal (Empleado, Disponibilidad, Turno, etc.)
+--  - Configuración de grilla (intervalo/inicio/fin)
+--  - Vista que expande disponibilidad a una grilla estilo "slots"
+-- =========================================================
+
+-- (Opcional) crear BD
+-- CREATE DATABASE IF NOT EXISTS gestorhorarios CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+-- USE gestorhorarios;
+
+SET NAMES utf8mb4;
+SET sql_safe_updates = 0;
+
+-- =========================================================
+-- Tabla principal: Empleado
+-- =========================================================
+CREATE TABLE IF NOT EXISTS empleado (
+  id_empleado       BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  nombre            VARCHAR(120) NOT NULL,
+  cargo             VARCHAR(100) NULL,
+  tipo_contrato     ENUM('completo','medio','honorarios','otro') DEFAULT 'otro',
+  horas_contrato    INT NULL,
+  creado_en         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- =========================================================
+-- Disponibilidad semanal (rangos por día)
+-- 0=Lunes ... 6=Domingo
+-- =========================================================
+CREATE TABLE IF NOT EXISTS disponibilidad (
+  id_disp           BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  id_empleado       BIGINT UNSIGNED NOT NULL,
+  dia_semana        TINYINT NOT NULL,
+  hora_inicio       TIME NOT NULL,
+  hora_fin          TIME NOT NULL,
+  es_almuerzo       BOOLEAN NOT NULL DEFAULT FALSE,
+  CONSTRAINT fk_disp_empleado
+    FOREIGN KEY (id_empleado) REFERENCES empleado(id_empleado)
+    ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT chk_dia_semana CHECK (dia_semana BETWEEN 0 AND 6),
+  CONSTRAINT chk_horas      CHECK (hora_fin > hora_inicio)
+) ENGINE=InnoDB;
+
+-- Evitar duplicidad exacta del mismo rango
+CREATE UNIQUE INDEX IF NOT EXISTS uq_disp_empleado_dia_rango
+ON disponibilidad (id_empleado, dia_semana, hora_inicio, hora_fin, es_almuerzo);
+
+CREATE INDEX IF NOT EXISTS idx_disp_empleado_dia ON disponibilidad (id_empleado, dia_semana);
+
+-- =========================================================
+-- Turno en fecha específica
+-- =========================================================
+CREATE TABLE IF NOT EXISTS turno (
+  id_turno          BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  fecha             DATE NOT NULL,
+  posicion          VARCHAR(100) NULL,
+  hora_inicio       TIME NOT NULL,
+  hora_fin          TIME NOT NULL,
+  CONSTRAINT chk_turno_horas CHECK (hora_fin > hora_inicio)
+) ENGINE=InnoDB;
+
+CREATE INDEX IF NOT EXISTS idx_turno_fecha ON turno (fecha);
+
+-- =========================================================
+-- Asignación de empleados a turnos
+-- =========================================================
+CREATE TABLE IF NOT EXISTS asignacion (
+  id_asig           BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  id_turno          BIGINT UNSIGNED NOT NULL,
+  id_empleado       BIGINT UNSIGNED NOT NULL,
+  horas_extra       INT NOT NULL DEFAULT 0,
+  CONSTRAINT fk_asig_turno
+    FOREIGN KEY (id_turno) REFERENCES turno(id_turno)
+    ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT fk_asig_empleado
+    FOREIGN KEY (id_empleado) REFERENCES empleado(id_empleado)
+    ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE=InnoDB;
+
+CREATE INDEX IF NOT EXISTS idx_asig_empleado ON asignacion (id_empleado);
+
+-- (Opcional) impedir doble asignación del mismo empleado al mismo turno
+CREATE UNIQUE INDEX IF NOT EXISTS uq_asig_turno_empleado
+ON asignacion (id_turno, id_empleado);
+
+-- =========================================================
+-- Ausencias (vacaciones, licencias, permisos)
+-- =========================================================
+CREATE TABLE IF NOT EXISTS ausencia (
+  id_aus            BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  id_empleado       BIGINT UNSIGNED NOT NULL,
+  tipo              ENUM('vacacion','licencia','permiso','otro') NOT NULL,
+  fecha_desde       DATE NOT NULL,
+  fecha_hasta       DATE NOT NULL,
+  CONSTRAINT fk_aus_empleado
+    FOREIGN KEY (id_empleado) REFERENCES empleado(id_empleado)
+    ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT chk_aus_rango CHECK (fecha_hasta >= fecha_desde)
+) ENGINE=InnoDB;
+
+CREATE INDEX IF NOT EXISTS idx_aus_empleado_rango ON ausencia (id_empleado, fecha_desde, fecha_hasta);
+
+-- =========================================================
+-- Renuncia programada
+-- =========================================================
+CREATE TABLE IF NOT EXISTS renuncia_programada (
+  id_ren            BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  id_empleado       BIGINT UNSIGNED NOT NULL,
+  fecha_renuncia    DATE NOT NULL,
+  CONSTRAINT fk_ren_empleado
+    FOREIGN KEY (id_empleado) REFERENCES empleado(id_empleado)
+    ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE=InnoDB;
+
+CREATE INDEX IF NOT EXISTS idx_ren_empleado ON renuncia_programada (id_empleado);
+
+-- =========================================================
+-- Configuración de grilla (mezcla con enfoque "slots" sin guardarlos)
+--  - Define el intervalo y la ventana diaria para construir la grilla
+--  - Puedes tener varias configs (por sucursal/proyecto). Usa la "activa".
+-- =========================================================
+CREATE TABLE IF NOT EXISTS config_grilla (
+  id_cfg            BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  nombre            VARCHAR(100) NOT NULL,
+  intervalo_min     INT NOT NULL CHECK (intervalo_min > 0),  -- 30, 60, etc.
+  inicio_min        INT NOT NULL CHECK (inicio_min BETWEEN 0 AND 1439),  -- minutos desde 00:00
+  fin_min           INT NOT NULL CHECK (fin_min BETWEEN 1 AND 1440),
+  activo            BOOLEAN NOT NULL DEFAULT TRUE,
+  CONSTRAINT chk_cfg_rango CHECK (fin_min > inicio_min)
+) ENGINE=InnoDB;
+
+-- Config por defecto (si no hay)
+INSERT INTO config_grilla (nombre, intervalo_min, inicio_min, fin_min, activo)
+SELECT 'Default 08-20 / 30min', 30, 8*60, 20*60, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM config_grilla);
+
+-- =========================================================
+-- Vista: grilla expandida por día/intervalo (sin almacenar cada celda)
+--  - Usa la config_grilla ACTIVA (primera TRUE encontrada)
+--  - Emite una fila por bloque de tiempo y por día (0..6)
+--  - Columna "disponible"=1 si el empleado X tiene un rango que cubre el bloque.
+-- Nota: las vistas en MySQL no aceptan parámetros; filtramos por empleado en SELECT final.
+-- =========================================================
+DROP VIEW IF EXISTS v_grilla_semana;
+CREATE VIEW v_grilla_semana AS
+WITH RECURSIVE
+cfg AS (
+  SELECT id_cfg, intervalo_min AS step, inicio_min AS s, fin_min AS e
+  FROM config_grilla
+  WHERE activo = TRUE
+  ORDER BY id_cfg
+  LIMIT 1
+),
+dias AS (
+  SELECT 0 AS d
+  UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3
+  UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6
+),
+mins AS (
+  SELECT s AS m FROM cfg
+  UNION ALL
+  SELECT m + (SELECT step FROM cfg) FROM mins, cfg
+  WHERE m + (SELECT step FROM cfg) < (SELECT e FROM cfg)
+)
+SELECT
+  (SELECT id_cfg FROM cfg) AS id_cfg,
+  d.d        AS dia_semana,                -- 0..6 (L..D)
+  m.m        AS minuto_inicio,             -- minuto desde 00:00
+  (SELECT step FROM cfg) AS intervalo_min, -- tamaño del bloque
+  -- etiquetas de hora legibles
+  CONCAT(LPAD(FLOOR(m.m/60),2,'0'),':',LPAD(MOD(m.m,60),2,'0'))        AS hhmm_ini,
+  CONCAT(LPAD(FLOOR((m.m + (SELECT step FROM cfg))/60),2,'0'),':',LPAD(MOD((m.m + (SELECT step FROM cfg)),60),2,'0')) AS hhmm_fin
+FROM dias d
+CROSS JOIN mins m;
+
+-- =========================================================
+-- Consulta ejemplo: grilla para un empleado con flag disponible (0/1)
+--  - Marca 1 si el bloque [minuto_inicio, minuto_inicio+intervalo) está contenido
+--    por algún rango de disponibilidad de ese empleado para ese día.
+-- =========================================================
+--   Reemplaza :EMP_ID por el id_empleado a consultar:
+--   SET @emp := 1;  -- ejemplo
+--   SELECT * FROM q_grilla_empleado;  -- tras definir @emp
+DROP VIEW IF EXISTS q_grilla_empleado;
+CREATE VIEW q_grilla_empleado AS
+SELECT
+  g.dia_semana,
+  g.minuto_inicio,
+  g.intervalo_min,
+  g.hhmm_ini,
+  g.hhmm_fin,
+  -- 1 si existe disponibilidad que cubra totalmente el bloque
+  CASE
+    WHEN EXISTS (
+      SELECT 1
+      FROM disponibilidad d
+      WHERE d.id_empleado = @emp
+        AND d.dia_semana  = g.dia_semana
+        AND g.hhmm_ini >= d.hora_inicio
+        AND g.hhmm_fin <= d.hora_fin
+        AND d.es_almuerzo = FALSE
+    ) THEN 1 ELSE 0
+  END AS disponible
+FROM v_grilla_semana g;
+
+-- =========================================================
+-- Datos de ejemplo (opcional)
+-- =========================================================
+INSERT INTO empleado (nombre, cargo, tipo_contrato, horas_contrato)
+VALUES ('Ana Pérez','Cajera','completo',45),
+       ('Juan Soto','Repositor','medio',30)
+ON DUPLICATE KEY UPDATE nombre = VALUES(nombre);
+
+-- Ana: Lunes a Viernes 08:00-13:00 y 14:00-18:00 (almuerzo 13-14)
+INSERT INTO disponibilidad (id_empleado, dia_semana, hora_inicio, hora_fin, es_almuerzo)
+SELECT e.id_empleado, d.d, '08:00','13:00', FALSE
+FROM empleado e JOIN (SELECT 0 d UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4) d
+WHERE e.nombre='Ana Pérez'
+ON DUPLICATE KEY UPDATE hora_inicio=VALUES(hora_inicio), hora_fin=VALUES(hora_fin);
+
+INSERT INTO disponibilidad (id_empleado, dia_semana, hora_inicio, hora_fin, es_almuerzo)
+SELECT e.id_empleado, d.d, '14:00','18:00', FALSE
+FROM empleado e JOIN (SELECT 0 d UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4) d
+WHERE e.nombre='Ana Pérez'
+ON DUPLICATE KEY UPDATE hora_inicio=VALUES(hora_inicio), hora_fin=VALUES(hora_fin);
+
+-- Juan: Martes-Jueves 10:00-16:00
+INSERT INTO disponibilidad (id_empleado, dia_semana, hora_inicio, hora_fin, es_almuerzo)
+SELECT e.id_empleado, d.d, '10:00','16:00', FALSE
+FROM empleado e JOIN (SELECT 1 d UNION ALL SELECT 3 d) d
+WHERE e.nombre='Juan Soto'
+ON DUPLICATE KEY UPDATE hora_inicio=VALUES(hora_inicio), hora_fin=VALUES(hora_fin);
+
+-- Turnos de ejemplo
+INSERT INTO turno (fecha, posicion, hora_inicio, hora_fin)
+VALUES ('2025-09-09','Caja','08:00','14:00'),
+       ('2025-09-09','Sala','14:00','20:00')
+ON DUPLICATE KEY UPDATE posicion=VALUES(posicion);
+
+-- Asignaciones de ejemplo
+INSERT INTO asignacion (id_turno, id_empleado, horas_extra)
+SELECT t.id_turno, e.id_empleado, 0
+FROM turno t
+JOIN empleado e ON e.nombre='Ana Pérez'
+WHERE t.fecha='2025-09-09' AND t.posicion='Caja'
+ON DUPLICATE KEY UPDATE horas_extra=VALUES(horas_extra);
+
+-- =========================================================
+-- Consultas útiles
+-- =========================================================
+
+-- 1) Ver disponibilidad expandida de Ana (usa variable @emp)
+SET @emp := (SELECT id_empleado FROM empleado WHERE nombre='Ana Pérez' LIMIT 1);
+SELECT * FROM q_grilla_empleado ORDER BY minuto_inicio, dia_semana;
+
+-- 2) Chequear conflictos: asignaciones en días/horas no disponibles
+--    (turno fuera de los rangos declarados por el empleado)
+SELECT a.id_asig, e.nombre, t.fecha, t.hora_inicio, t.hora_fin
+FROM asignacion a
+JOIN empleado e ON e.id_empleado = a.id_empleado
+JOIN turno t    ON t.id_turno    = a.id_turno
+LEFT JOIN disponibilidad d
+  ON d.id_empleado = a.id_empleado
+ AND d.dia_semana = WEEKDAY(t.fecha)       -- WEEKDAY(): Lunes=0..Domingo=6
+ AND t.hora_inicio >= d.hora_inicio
+ AND t.hora_fin    <= d.hora_fin
+ AND d.es_almuerzo = FALSE
+WHERE d.id_disp IS NULL;
+
+-- 3) Ausencias que chocan con asignaciones futuras
+SELECT a.id_asig, e.nombre, t.fecha, au.tipo
+FROM asignacion a
+JOIN turno t ON t.id_turno = a.id_turno
+JOIN empleado e ON e.id_empleado = a.id_empleado
+JOIN ausencia  au ON au.id_empleado = a.id_empleado
+WHERE t.fecha BETWEEN au.fecha_desde AND au.fecha_hasta;
